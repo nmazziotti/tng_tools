@@ -29,21 +29,6 @@ parser.add_argument("-i", default=99, type=int, help="Initial snapshot")
 # If this argument is not used in the command line, a prompt will show up to specify snapshot to stop at  
 parser.add_argument("-f", type=int, help="Final snapshot")
 
-args = parser.parse_args()
-
-sim_name = args.sim
-
-# Ex: If subhalos 0 and 1 are desired, type the following after the prompt: 0 1
-subhalo_ids = list(input("Which pair of subhalos would you like to plot? Separate by a space: ").split(" "))
-
-snap_start = args.i
-
-if args.f:
-    snap_end = args.f 
-else:
-    snap_end = int(input("What snapshot would you like to end at? "))
-
-print("------------------------------------------")
 
 def calc_dist(x1, y1, z1, x2, y2, z2):
     """Returns a list of distances between the pair of subhalo coordinates over time"""
@@ -176,4 +161,21 @@ def plot_distance(sim_name, sub1, sub2, snap_start, snap_end):
     fig.savefig(fig_fn)
     print(f"Figure saved at {fig_fn}")
 
-plot_distance(sim_name, subhalo_ids[0], subhalo_ids[1], snap_start, snap_end) 
+if __name__ == '__main__':
+    args = parser.parse_args()
+
+    sim_name = args.sim
+
+    # Ex: If subhalos 0 and 1 are desired, type the following after the prompt: 0 1
+    subhalo_ids = list(input("Which pair of subhalos would you like to plot? Separate by a space: ").split(" "))
+
+    snap_start = args.i
+
+    if args.f:
+        snap_end = args.f 
+    else:
+        snap_end = int(input("What snapshot would you like to end at? "))
+
+    print("------------------------------------------")
+    
+    plot_distance(sim_name, subhalo_ids[0], subhalo_ids[1], snap_start, snap_end) 
