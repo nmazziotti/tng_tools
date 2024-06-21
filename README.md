@@ -15,4 +15,6 @@
 ### Finally, push changes to the main branch to update on github:
 ```git push origin main```
 
-### If changes have been made to the main branch since your last commit, use ```git pull``` to keep your files up to date. 
+### If changes have been made to the main branch since your last commit, use 
+```git pull``` 
+### to keep your files up to date. 
