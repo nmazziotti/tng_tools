@@ -124,7 +124,7 @@ def animation(sim_name, sub1, sub2, snap_start):
 
     gif_fn = f"3d_anim_{sub1}&{sub2}.gif"
 
-    anim_dir = f"./{sim_name}/animations/"
+    anim_dir = f"../{sim_name}/animations/"
     if not os.path.exists(anim_dir):
         os.makedirs(anim_dir)
     fn = anim_dir + gif_fn

@@ -68,7 +68,7 @@ def dist_anim(sub1, sub2, sim_name, y_axis):
 
     fig.legend()
     plt.show()
-    anim_dir = f"./{sim_name}/animations/"
+    anim_dir = f"../{sim_name}/animations/"
     if not os.path.exists(anim_dir):
         os.makedirs(anim_dir)
     fn = anim_dir + gif_fn

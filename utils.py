@@ -17,7 +17,7 @@ def get(path, sim_name=None, params=None):
          filename = r.headers['content-disposition'].split("filename=")[1]
 
         # Creates new directories for the simulation and hdf5_files
-         folder_path = f"./{sim_name}/hdf5_files"
+         folder_path = f"../{sim_name}/hdf5_files"
          if not os.path.exists(folder_path):
              os.makedirs(folder_path)
 

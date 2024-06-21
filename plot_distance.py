@@ -152,7 +152,7 @@ def plot_distance(sim_name, sub1, sub2, snap_start, snap_end):
     fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
 
     # Save figure to a directory called plots
-    fig_fn = "./%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub1, sub2, snap_start, snap_end)
+    fig_fn = "../%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub1, sub2, snap_start, snap_end)
     plot_path = f"./{sim_name}/plots"
     if not os.path.exists(plot_path):
         os.makedirs(plot_path)
