@@ -1,6 +1,10 @@
 import pandas as pd
 import requests
 import os
+import math
+import numpy as np
+
+from scipy.integrate import quad
 
 def get(path, sim_name=None, params=None):
     # make HTTP GET request to path
@@ -43,3 +47,32 @@ def redshifts(sim_name):
     # Saves list of redshifts and scale factors to a pandas table for future reference
     df = pd.DataFrame.from_dict(info, orient="index", columns=["z", "a"])
     return df
+
+def integrand(zz):
+    om = 0.3089
+    ol = 0.6911
+    E = math.sqrt(om*(1+zz)**3 + ol)
+    return 1/((1.0 + zz) * E)
+
+def lookback_time(x):
+
+    if type(x) != int and type(x) != float and type(x):
+        t_list = np.empty(len(x))
+
+        for i in range(len(x)):
+            th = (3.09*(10**17))*(1/0.6774)
+            I = quad(integrand, 0, float(x[i]))
+            result = I[0]*th/(365.25*24*60*60)/(10**9)
+            t_list[i] = result 
+        
+        return t_list 
+
+    else:
+        th = (3.09*(10**17))*(1/0.6774)
+        #print(th)
+        I = quad(integrand, 0, float(x))
+        #print(I)
+        result = I[0]*th/(365.25*24*60*60)/(10**9)
+        #print("Lookback Time: ~" + str(result) + " Gyr")
+        #print("Age of Universe (at that redshift): ~" + str(13.803 - result) + " Gyr")
+        return result
