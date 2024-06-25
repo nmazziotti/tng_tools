@@ -1,13 +1,14 @@
 # Created base code in ChatGPT
+
+from .utils import download_hdf5
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d 
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 import os
-
 import argparse
-from plot_distance import download_hdf5
 
 font = {'family' : 'serif',
         'size'   : 14}
@@ -22,7 +23,7 @@ parser.add_argument("-s", "--sim", required=True, type=str, help="Select simulat
 
 
 def animation(sim_name, sub1, sub2, snap_start):
-    f1, f2 = download_hdf5(sim_name, sub1, sub2, snap_start)
+    f1, f2 = download_hdf5(sim_name, snap_start, subhalo_list=[sub1, sub2])
 
     r1 = f1['SubhaloHalfmassRad'][:]
     r2 = f2['SubhaloHalfmassRad'][:]

@@ -7,8 +7,7 @@ import h5py
 
 from matplotlib import rc 
 
-from subhalo_info import get_subhalo
-from utils import get, redshifts
+from .utils import redshifts, download_hdf5, lookback_time
 
 font = {'family' : 'serif',
         'size'   : 14}
@@ -29,6 +28,8 @@ parser.add_argument("-i", default=99, type=int, help="Initial snapshot")
 # If this argument is not used in the command line, a prompt will show up to specify snapshot to stop at  
 parser.add_argument("-f", type=int, help="Final snapshot")
 
+parser.add_argument("-x", type=str, default='time', help="Plot either redshift, snapshot, or time on x-axis")
+
 
 def calc_dist(x1, y1, z1, x2, y2, z2):
     """Returns a list of distances between the pair of subhalo coordinates over time"""
@@ -38,34 +39,11 @@ def calc_dist(x1, y1, z1, x2, y2, z2):
         dist.append(r)
     return dist
 
-def download_hdf5(sim_name, sub1, sub2, snap_start):
-    """Downloads the hdf5 files of the subhalos or reads in the hdf5 files if they already exist"""
-    mpb1 = f"./{sim_name}/hdf5_files/lhalotree_mpb_{sub1}.hdf5"
-    mpb2 = f"./{sim_name}/hdf5_files/lhalotree_mpb_{sub2}.hdf5"
-
-    # Subhalo 1
-    if os.path.isfile(mpb1):
-        f1 = h5py.File(mpb1, 'r')
-    else:
-        print(f"Retrieving Subhalo {sub1} information...")
-        subhalo1 = get_subhalo(sub1, snap_start, sim_name=sim_name)
-        mpb1 = get( subhalo1['trees']['lhalotree_mpb'], sim_name=sim_name)
-        f1 = h5py.File(mpb1, 'r')
-
-    # Subhalo 2
-    if os.path.isfile(mpb2):
-        f2 = h5py.File(mpb2, 'r')
-    else:
-        print(f"Retrieving Subhalo {sub2} information...")
-        subhalo2 = get_subhalo(sub2, snap_start, sim_name=sim_name)
-        mpb2 = get( subhalo2['trees']['lhalotree_mpb'], sim_name=sim_name)
-        f2 = h5py.File(mpb2, 'r')
-
-    return f1, f2
-
-def plot_distance(sim_name, sub1, sub2, snap_start, snap_end):
+def plot_distance(sim_name, sub1, sub2, snap_start, snap_end, x_axis):
     """Plots the distance between the two subhalos over the range of given snapshots"""
-    f1, f2 = download_hdf5(sim_name, sub1, sub2, snap_start)
+    files = download_hdf5(sim_name, snap_start, subhalo_list=[sub1, sub2])
+
+    f1, f2 = files[0], files[1]
 
     try: 
         df = pd.read_csv(f"{sim_name}/redshifts+scale_factors.csv")
@@ -126,33 +104,35 @@ def plot_distance(sim_name, sub1, sub2, snap_start, snap_end):
     y_label = "Distance [Mpc]"
 
     # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
-    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(10,8))
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
 
-    # Redshift on x-axis plots
-    ax[0,0].plot(z_vals[:i], codist)
-    ax[0,1].plot(z_vals[:i], dist)
-    ax[0,0].set_xlabel("Redshift")
-    ax[0,1].set_xlabel("Redshift")
-    
-    # Snapshot number on x-axis plots 
-    ax[1,0].plot(snapnum1[:i], codist)
-    ax[1,1].plot(snapnum1[:i], dist)
-    ax[1,0].set_xlabel("Snapshot")
-    ax[1,1].set_xlabel("Snapshot")
 
-    ax[0,0].set_ylabel(co_y_label)
-    ax[0,1].set_ylabel(y_label)
-    ax[1,0].set_ylabel(co_y_label)
-    ax[1,1].set_ylabel(y_label)
+    if x_axis.lower() == 'redshift':
+        ax[0].plot(z_vals[:i], codist)
+        ax[1].plot(z_vals[:i], dist)
+        ax[0].set_xlabel("Redshift")
+        ax[1].set_xlabel("Redshift")
+    elif x_axis.lower() == 'snapshot':
+        ax[0].plot(snapnum1[:i], codist)
+        ax[1].plot(snapnum1[:i], dist)
+        ax[0].set_xlabel("Snapshot")
+        ax[1].set_xlabel("Snapshot")
+        ax[0].invert_xaxis()
+        ax[1].invert_xaxis()
+    else:
+        times = [lookback_time(float(z)) for z in z_vals[:i]]
+        ax[0].plot(times, codist)
+        ax[1].plot(times, dist)
+        ax[0].set_xlabel("Lookback Time [Gyr]")
+        ax[1].set_xlabel("Lookback Time [Gyr]")
 
-    # Invert snapshot axis so that the time evolution is the same direction as increasing redshift 
-    ax[1,0].invert_xaxis()
-    ax[1,1].invert_xaxis()
+    ax[0].set_ylabel(co_y_label)
+    ax[1].set_ylabel(y_label)
 
     fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
 
     # Save figure to a directory called plots
-    fig_fn = "../%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub1, sub2, snap_start, snap_end)
+    fig_fn = "./%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub1, sub2, snap_start, snap_end)
     plot_path = f"./{sim_name}/plots"
     if not os.path.exists(plot_path):
         os.makedirs(plot_path)
@@ -171,6 +151,8 @@ if __name__ == '__main__':
 
     snap_start = args.i
 
+    x_axis = args.x
+
     if args.f:
         snap_end = args.f 
     else:
@@ -178,4 +160,4 @@ if __name__ == '__main__':
 
     print("------------------------------------------")
     
-    plot_distance(sim_name, subhalo_ids[0], subhalo_ids[1], snap_start, snap_end) 
+    plot_distance(sim_name, subhalo_ids[0], subhalo_ids[1], snap_start, snap_end, x_axis=x_axis) 
