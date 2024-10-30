@@ -34,25 +34,6 @@ font = {'family' : 'serif',
        'size': 12}
 
 rc('font', **font)
-
-basePath = '/virgotng/mpia/TNG-Cluster/L680n8192TNG/output'
-basePath1 = '/virgotng/universe/IllustrisTNG/TNG300-1/output'
-basePath2 = '/virgotng/universe/IllustrisTNG/TNG300-2/output'
-basePath3 = '/virgotng/universe/IllustrisTNG/TNG300-3/output'
-
-try:
-    df = pd.read_csv('./redshifts+scale_factors.csv')
-except FileNotFoundError:
-
-    info = {}
-
-    for i in range(100):
-        hdr = gc.loadHeader(basePath, snapNum=i)
-        info[i] = [hdr['Redshift']]
-        info[i].append(hdr['Time'])
-
-    df = pd.DataFrame.from_dict(info, orient="index", columns=["z", "a"])
-    df.to_csv('./redshifts+scale_factors.csv', index=False)
     
 
 def create_proj(s, snapNum, proj, pos, depth, max_dist, npix):

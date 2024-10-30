@@ -15,6 +15,11 @@ import illustris_python.sublink as sl
 import illustris_python.groupcat as gc
 import illustris_python.lhalotree as lht
 
+basePathC = '/virgotng/mpia/TNG-Cluster/L680n8192TNG/output'
+basePath1 = '/virgotng/universe/IllustrisTNG/TNG300-1/output'
+basePath2 = '/virgotng/universe/IllustrisTNG/TNG300-2/output'
+basePath3 = '/virgotng/universe/IllustrisTNG/TNG300-3/output'
+
 def get(path, sim_name=None, params=None):
     # make HTTP GET request to path
     headers = {"api-key":"525de37a430c4c1fae3b595204b6c2d2"}
@@ -72,7 +77,7 @@ def download_hdf5(basePath, snap_start, subhalo_list):
 
     return files
 
-def redshifts():
+def redshifts(basePath):
     info = {}
 
     for i in range(100):
@@ -82,6 +87,7 @@ def redshifts():
 
     df = pd.DataFrame.from_dict(info, orient="index", columns=["z", "a"])
     df.to_csv('./redshifts+scale_factors.csv', index=False)
+    return df
 
 def integrand(zz):
     om = 0.3089

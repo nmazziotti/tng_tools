@@ -14,11 +14,13 @@ import illustris_python.sublink as sl
 import illustris_python.groupcat as gc
 import illustris_python.lhalotree as lht
 
+
+basePath = basePath1
+
 try:
-    df = pd.read_csv("redshifts+scale_factors.csv")
+    df = pd.read_csv('./redshifts+scale_factors.csv')
 except FileNotFoundError:
-    redshifts()
-    df = pd.read_csv("redshifts+scale_factors.csv")
+    df = redshifts(basePath)
 
 
 def locate_min(dist, candidates, concav, snap_list):
@@ -46,7 +48,6 @@ def locate_min(dist, candidates, concav, snap_list):
 
 def create_runlist(IDs, coords, min_sep, snapNum):
     runlist = {}
-
     a = df["a"][snapNum]
 
     convert = (1/0.6774)*0.001*a
@@ -631,7 +632,7 @@ def min_mass(dir_name, basePath, sub1, sub2, snap_start, logger=None):
     #print(list(has_merged).count(True))
     
     
-def plot_merger_new(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+def plot_merger_hmr(dir_name, basePath, sub1, sub2, snap_start, logger=None):
     # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
 
     return_list = pass_through(dir_name, basePath, sub1, sub2, snap_start, logger)
