@@ -28,7 +28,13 @@ font = {'family' : 'serif',
 
 rc('font', **font)
 
-basePath = basePath1
+sim_name = "TNG300-2"
+basePath = basePath2
+
+try:
+    df = pd.read_csv('./redshifts+scale_factors.csv')
+except FileNotFoundError:
+    df = redshifts(basePath)
 
 snapNum = 49    
     
@@ -48,7 +54,7 @@ hm_rad = subhalos['SubhaloHalfmassRad'][mass_cut]
 ids = indices[mass_cut]
 print(f"Number of subhalos above mass {min_mass}: {len(ids)}")
 
-dir_name = f"z={np.round(df['z'][snapNum], 4)}_10^{np.log10(min_mass)}"
+dir_name = f"{sim_name}/z={np.round(df['z'][snapNum], 4)}_10^{np.log10(min_mass)}"
 if not os.path.exists(dir_name):
     os.makedirs(dir_name)
 
@@ -59,7 +65,7 @@ try:
     for column in df_runlist.columns:
         runlist[column] = json.loads(df_runlist[column][0])
 except FileNotFoundError:
-    runlist = create_runlist(ids, c, 10, snapNum)
+    runlist = create_runlist(df, ids, c, 10, snapNum)
     df_runlist = pd.DataFrame([runlist])
     df_runlist.to_csv(f"./{dir_name}/runlist.csv", index=False)
     
@@ -85,7 +91,7 @@ for key in tqdm(list(runlist.keys())[:]):
             if [int(key), int(id)] in already_ran or [int(id), int(key)] in already_ran:
                  pass
             else:
-                row = plot_merger_hmr(dir_name=dir_name, basePath=basePath, snap_start=snapNum, sub1=int(key), sub2=int(id), logger=logger)
+                row = plot_merger_hmr(df, dir_name=dir_name, basePath=basePath, snap_start=snapNum, sub1=int(key), sub2=int(id), logger=logger)
                 if row:
                     df_mergers = pd.concat([df_mergers, pd.DataFrame([row])])
                 already_ran.append([int(key), int(id)])

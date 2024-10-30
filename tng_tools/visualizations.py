@@ -1,20 +1,10 @@
 import h5py
 import numpy
-from tqdm import tqdm
 import matplotlib.pyplot as plt
-import os
-import json
 import sys
 import numpy as np
-import pandas as pd
-import logging
-from tqdm.auto import tqdm
 from matplotlib import ticker, rc
-import matplotlib as mpl
-from astropy import constants as const
 from astropy import units as u
-from matplotlib.colors import LogNorm
-from scipy.ndimage import gaussian_filter
 from astropy import wcs                                                          
 from astropy.io import fits 
 
@@ -27,8 +17,6 @@ import illustris_python.lhalotree as lht
 import illustris_python.snapshot as sn 
 
 from .utils import *
-from .animation_3D import *
-from .find_merger import *
 
 font = {'family' : 'serif', 
        'size': 12}
@@ -152,6 +140,7 @@ def create_wcs(npix, crpix_x, crpix_y, xps, yps, proj, pos):
         xlabel = 'Offset z'
         ylabel = 'Offset y'
         
+    # Axes are reversed when plotted in image
     wcs_dict = {
     "CTYPE1": xlabel,
     "CUNIT1": "kpc",
