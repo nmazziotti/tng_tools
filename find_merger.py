@@ -1,24 +1,38 @@
-from .utils import calc_dist, redshifts, download_hdf5, align_snapshots, lookback_time
+from .utils import *
+
+
 import pandas as pd
 import numpy as np
 from tqdm.auto import tqdm
 from scipy.signal import argrelextrema
 import matplotlib.pyplot as plt
 import os
+import sys
+
+sys.path.append("../")
+import illustris_python.sublink as sl 
+import illustris_python.groupcat as gc
+import illustris_python.lhalotree as lht
+
+try:
+    df = pd.read_csv("redshifts+scale_factors.csv")
+except FileNotFoundError:
+    redshifts()
+    df = pd.read_csv("redshifts+scale_factors.csv")
 
 
-def locate_min(dist, candidates, concav, max_snap, comoving=False):
-    """Function that flags any minima that occur below 5 Mpc and are concave up"""
+def locate_min(dist, candidates, concav, snap_list):
+    """Function that flags any minima that occur below 1 Mpc and are concave up"""
     x = []
     y = []
 
     mins = dist[candidates]
     for i in range(len(mins)):
-        if mins[i] < 5:
+        if mins[i] < 1.0:
             try:
                 avg_concav = (concav[candidates[0][i] - 1] + concav[candidates[0][i]] + concav[candidates[0][i] + 1])/3 
                 if avg_concav > 0:
-                    x.append(max_snap - candidates[0][i])
+                    x.append(snap_list[candidates[0][i]])
                     y.append(mins[i])
                     # if comoving:
                     #     print(f"Potential merger event in comoving coordinates at Snapshot {max_snap - candidates[0][i]}")
@@ -30,149 +44,695 @@ def locate_min(dist, candidates, concav, max_snap, comoving=False):
     return x,y
 
 
-def create_runlist(data, sim_name, min_sep):
+def create_runlist(IDs, coords, min_sep, snapNum):
     runlist = {}
 
-    try: 
-        df = pd.read_csv(f"{sim_name}/redshifts+scale_factors.csv")
-    except FileNotFoundError:
-        df = redshifts(sim_name)
-        df.to_csv(f"{sim_name}/redshifts+scale_factors.csv")
-
-    a = df["a"][99]
+    a = df["a"][snapNum]
 
     convert = (1/0.6774)*0.001*a
-        
-    x = np.array(data["x"][:])*convert
-    y = np.array(data["y"][:])*convert
-    z = np.array(data["z"][:])*convert
+ 
+    x = np.array(coords[:,0])*convert
+    y = np.array(coords[:,1])*convert
+    z = np.array(coords[:,2])*convert
     
-    for i in tqdm(range(len(df))):
+    for i in tqdm(range(len(coords))):
         close = []
-        for j in range(len(df)):
+        for j in range(len(coords)):
             if i != j:
                 dist = np.sqrt( (x[i]-x[j])**2 + (y[i]-y[j])**2 + (z[i]-z[j])**2 )
                 if dist < min_sep:
-                    close.append(data['subhalo_id'][j])
+                    close.append(IDs[j])
         if close:
-            runlist[f"{data['subhalo_id'][i]}"] = close
+            runlist[f"{IDs[i]}"] = close
 
     return runlist
 
 
-
-def flag_merger(sim_name, sub1, sub2, snap_start, snap_end):
-    """Plots the distance between the two subhalos over the range of given snapshots"""
-    f1, f2 = download_hdf5(sim_name, snap_start, subhalo_list=[sub1, sub2])
-
-    try: 
-        df = pd.read_csv(f"{sim_name}/redshifts+scale_factors.csv")
-    except FileNotFoundError:
-        df = redshifts(sim_name)
-        df.to_csv(f"{sim_name}/redshifts+scale_factors.csv")
+def flag_merger(dir_name, basePath, sub1, sub2, snap_start, logger=None):
 
     #z_vals = np.flip(np.array(df["z"]))
     #a_vals = np.flip(np.array(df["a"]))
-
-    new_data = align_snapshots(f1, f2)
     
-    snapnum1 = new_data[0][0]
-    pos1 = new_data[0][1] # x,y,z coordinates of subhalo 1 over all snapshots
+    f1 = sl.loadTree(basePath, snapNum=snap_start, id=sub1, fields=['SubhaloPos', 'SubhaloMass', 'SnapNum'], onlyMDB=True, treeName="SubLink", cache=True)
+    f2 = sl.loadTree(basePath, snapNum=snap_start, id=sub2, fields=['SubhaloPos', 'SubhaloMass', 'SnapNum'], onlyMDB=True, treeName="SubLink", cache=True)
 
-    snapnum2 = new_data[1][0]
-    pos2 = new_data[1][1] # x,y,z coordinates of subhalo 2 over all snapshots
+    try:
+        if len(f1['SubhaloPos']) > 101 - snap_start or len(f2['SubhaloPos']) > 101 - snap_start:
+            return [False]
+        else:
+            if max(f1['SubhaloMass'][:]*1e10/0.704) > 1e13 and max(f2['SubhaloMass'][:]*1e10/0.704) > 1e13:
+                new_data = align_snapshots(f1, f2)
 
-    new_a_vals = []
-    new_z_vals = []
-    for snap in snapnum1:
-        new_a_vals.append(df["a"][snap])
-        new_z_vals.append(df["z"][snap])
+                snapnum1 = new_data[0][0]
+                pos1 = new_data[0][1] # x,y,z coordinates of subhalo 1 over all snapshots
 
-    new_a_vals = np.array(new_a_vals)
-    new_z_vals = np.array(new_z_vals)
+                snapnum2 = new_data[1][0]
+                pos2 = new_data[1][1] # x,y,z coordinates of subhalo 2 over all snapshots
 
-    # Subhalo coordinates are by default in ckpc/h, so this converts to cMpc/h
-    codist = np.array(calc_dist(pos1[:, 0]/1000, pos1[:, 1]/1000, pos1[:, 2]/1000, pos2[:, 0]/1000, pos2[:, 1]/1000, pos2[:, 2]/1000))
-    co_y_label = "Distance [cMpc/h]"
+                snap_list = snapnum1
+                final_snap = snap_list[-1]
 
-    # Factor to convert each comoving coordinate to the physical coordinate
-    convert = (1/0.6774)*0.001*new_a_vals
-    dist = np.array(calc_dist(pos1[:, 0]*convert, pos1[:, 1]*convert, pos1[:, 2]*convert, pos2[:, 0]*convert, pos2[:, 1]*convert, pos2[:, 2]*convert))
-    y_label = "Distance [Mpc]"
 
-    co_min = argrelextrema(codist, np.less)
-    co_concav = np.diff(codist, n=2)
+                new_a_vals = []
+                new_z_vals = []
+                for snap in snapnum1:
+                    new_a_vals.append(df["a"][snap])
+                    new_z_vals.append(df["z"][snap])
 
-    phys_min = argrelextrema(dist, np.less)
-    phys_concav = np.diff(dist, n=2)
+                new_a_vals = np.array(new_a_vals)
+                new_z_vals = np.array(new_z_vals)
 
-    co_x, co_y = locate_min(codist, co_min, co_concav, max_snap=snap_start, comoving=True)
-    phys_x, phys_y = locate_min(dist, phys_min, phys_concav, max_snap=snap_start)
+                look_at = (new_z_vals < 100)
 
-    
-    if co_x or phys_x:
-        return [True, new_z_vals, codist, dist, co_x, co_y, phys_x, phys_y]
-    else:
+                # Subhalo coordinates are by default in ckpc/h, so this converts to cMpc/h
+                codist = np.array(calc_dist(pos1, pos2, convert=[]))/1000
+                co_y_label = "Distance [cMpc/h]"
+
+                # Factor to convert each comoving coordinate to the physical coordinate
+                convert = (1/0.6774)*0.001*new_a_vals[look_at]
+                dist = np.array(calc_dist(pos1, pos2, convert=convert))
+                y_label = "Distance [Mpc]"
+                if abs(max(dist) - min(dist)) < 50:
+
+                    co_min = argrelextrema(codist, np.less)
+                    co_concav = np.diff(codist, n=2)
+
+                    phys_min = argrelextrema(dist, np.less)
+                    phys_concav = np.diff(dist, n=2)
+
+
+                    #co_x, co_y = locate_min(codist, co_min, co_concav, max_snap=snap_start, comoving=True)
+                    phys_x, phys_y = locate_min(dist, phys_min, phys_concav, snapnum1[look_at])
+
+
+                    if phys_x:
+                        if logger:
+                            logger.info(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                        else:
+                            pass
+                            #print(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                        return [True, new_z_vals[look_at], dist, phys_x, phys_y, y_label, snapnum1[look_at]]
+                    else:
+                        return [False]
+                
+                else:
+                        if logger:
+                            logger.info(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+                        else:
+                            pass
+                            #print(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+
+                        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10,4))
+
+                        ax[0].plot(lookback_time(new_z_vals[look_at]), codist)
+                        ax[1].plot(lookback_time(new_z_vals[look_at]), dist)
+                        ax[0].set_xlabel("Lookback Time [Gyr]")
+                        ax[1].set_xlabel("Lookback Time [Gyr]")
+
+
+                        fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+                        # Save figure to a directory called plots
+                        fig_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_start, snapnum1[look_at][-1])
+
+                        reverse_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_start, snapnum1[look_at][-1])
+                        plot_path = f"./{dir_name}/plots/unphysical"
+                        if not os.path.exists(plot_path):
+                            os.makedirs(plot_path)
+
+                        if not os.path.exists(reverse_fn):
+                            fig.savefig(fig_fn)
+
+                        plt.close(fig=fig)
+
+                        return [False]
+            else:
+                return [False]
+    except TypeError:
+        print(f"Error: {sub1} & {sub2}")
         return [False]
+                
+#     new_data = align_snapshots(f1, f2)
     
-def plot_merger(sim_name, sub1, sub2, snap_start, snap_end):
-    try: 
-        df = pd.read_csv(f"{sim_name}/redshifts+scale_factors.csv")
-    except FileNotFoundError:
-        df = redshifts(sim_name)
-        df.to_csv(f"{sim_name}/redshifts+scale_factors.csv")
+#     snapnum1 = new_data[0][0]
+#     pos1 = new_data[0][1] # x,y,z coordinates of subhalo 1 over all snapshots
 
-    # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
-
-    return_list = flag_merger(sim_name, sub1, sub2, snap_start, snap_end)
-    if return_list[0] == True:
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10,4))
-
-        z_vals = return_list[1]
-        codist = return_list[2]
-        dist = return_list[3]
-        co_x = return_list[4]
-        co_y = return_list[5]
-        phys_x = return_list[6]
-        phys_y = return_list[7]
+#     snapnum2 = new_data[1][0]
+#     pos2 = new_data[1][1] # x,y,z coordinates of subhalo 2 over all snapshots
 
 
-        ax[0].plot(lookback_time(z_vals[:]), codist)
-        ax[1].plot(lookback_time(z_vals[:]), dist)
-        ax[0].set_xlabel("Lookback Time [Gyr]")
-        ax[1].set_xlabel("Lookback Time [Gyr]")
+#     new_a_vals = []
+#     new_z_vals = []
+#     for snap in snapnum1:
+#         new_a_vals.append(df["a"][snap])
+#         new_z_vals.append(df["z"][snap])
 
-        # ax[1,0].plot(snapnum1[:i], codist)
-        # ax[1,1].plot(snapnum1[:i], dist)
+#     new_a_vals = np.array(new_a_vals)
+#     new_z_vals = np.array(new_z_vals)
 
-        co_y_label = "Comoving Distance [cMpc/h]"
-        y_label = "Distance [Mpc]"
+#     look_at = (new_z_vals < 100)
 
+#     # Subhalo coordinates are by default in ckpc/h, so this converts to cMpc/h
+#     codist = np.array(calc_dist(pos1, pos2, convert=[]))/1000
+#     co_y_label = "Distance [cMpc/h]"
 
-        ax[0].set_ylabel(co_y_label)
-        ax[1].set_ylabel(y_label)
+#     # Factor to convert each comoving coordinate to the physical coordinate
+#     convert = (1/0.6774)*0.001*new_a_vals[look_at]
+#     dist = np.array(calc_dist(pos1, pos2, convert=convert))
+#     y_label = "Distance [Mpc]"
+
+#     if abs(max(dist) - min(dist)) < 50:
+
+#         co_min = argrelextrema(codist, np.less)
+#         co_concav = np.diff(codist, n=2)
+
+#         phys_min = argrelextrema(dist, np.less)
+#         phys_concav = np.diff(dist, n=2)
         
 
-        ax[0].plot([lookback_time(float(df["z"][snap])) for snap in co_x], co_y, 'o', color='red', markersize=4, label="Merger?")
-        ax[1].plot([lookback_time(float(df["z"][snap])) for snap in phys_x], phys_y, 'o', color='red', markersize=4, label="Merger?")
+#         #co_x, co_y = locate_min(codist, co_min, co_concav, max_snap=snap_start, comoving=True)
+#         phys_x, phys_y = locate_min(dist, phys_min, phys_concav, snapnum1[look_at])
+
+        
+#         if phys_x:
+#             if logger:
+#                 logger.info(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+#             else:
+#                 pass
+#                 #print(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+#             return [True, new_z_vals[look_at], dist, phys_x, phys_y, y_label, snapnum1[look_at]]
+#         else:
+#             return [False]
+#     else:
+#         if logger:
+#             logger.info(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+#         else:
+#             pass
+#             #print(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+
+#         fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10,4))
+
+#         ax[0].plot(lookback_time(new_z_vals[look_at]), codist)
+#         ax[1].plot(lookback_time(new_z_vals[look_at]), dist)
+#         ax[0].set_xlabel("Lookback Time [Gyr]")
+#         ax[1].set_xlabel("Lookback Time [Gyr]")
 
 
-        ax[0].legend()
-        ax[1].legend()
+#         fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+#         # Save figure to a directory called plots
+#         fig_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_start, snapnum1[look_at][-1])
+
+#         reverse_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_start, snapnum1[look_at][-1])
+#         plot_path = f"./{dir_name}/plots/unphysical"
+#         if not os.path.exists(plot_path):
+#             os.makedirs(plot_path)
+
+#         if not os.path.exists(reverse_fn):
+#             fig.savefig(fig_fn)
+
+#         plt.close(fig=fig)
+
+#         return [False]
+    
+
+def find_pericenter(times, dists):
+    p = min(dists)
+    p_index = np.where(dists == p)[0][0]
+    t_p = times[p_index]
+
+    return t_p, p
+
+def find_apocenter(times, dists):
+    a = max(dists)
+    a_index = np.where(dists == a)[0][0]
+    t_a = times[a_index]
+    return t_a, a
+    
+def plot_merger_alone(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+    # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
+
+    return_list = flag_merger(dir_name, basePath, sub1, sub2, snap_start, logger)
+    if return_list[0] == True:
+
+        z_vals = return_list[1]
+        dist = return_list[2]
+        flag_x = return_list[3]
+        flag_y = return_list[4]
+        y_label = return_list[5]
+        snap_list = return_list[6]
+        final_snap = snap_list[-1]
+        
+
+        t_p, p = find_pericenter([lookback_time(float(df["z"][snap])) for snap in snap_list], dist)
+        z_p, p = find_pericenter([float(df["z"][snap]) for snap in snap_list], dist)
+        snap_p, p = find_pericenter(snap_list, dist)
+
+        t_a, a = find_apocenter([lookback_time(float(df["z"][snap])) for snap in snap_list], dist)
+        z_a, a = find_apocenter([float(df["z"][snap]) for snap in snap_list], dist)
+        snap_a, a = find_apocenter(snap_list, dist)
+        
+
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,5))
+        ax.plot(lookback_time(z_vals[:]), dist)
+        ax.set_xlabel("Lookback Time [Gyr]")
+
+        ax.axvline(x = t_p, color='gray', linestyle="--")
+        
+        ax.text(t_p - 0.1, max(dist)/2, "Merger?", rotation=90, color='gray', backgroundcolor='white', fontsize=12)
+
+
+        ax.set_ylabel(y_label)
+        
+
+        ax.plot([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y, 'o', color='red', markersize=4, label=f"({np.round(t_p,3)} Gyr, {np.round(p, 3)} Mpc)")
+        #ax.plot([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y, 'o', color='red', markersize=4, label=f"Placeholder Gyr, Placeholder Mpc)")
+
+        ax.legend()
 
         fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
 
         # Save figure to a directory called plots
-        fig_fn = "./%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub1, sub2, snap_start, snap_end)
+        fig_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_list[0], snap_list[-1])
 
-        revese_fn = "./%s/plots/dist_%s&%s_snap=%s-%s.png"%(sim_name, sub2, sub1, snap_start, snap_end)
-        plot_path = f"./{sim_name}/plots"
+        reverse_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_list[0], snap_list[-1])
+        plot_path = f"./{dir_name}/plots/mergers"
         if not os.path.exists(plot_path):
             os.makedirs(plot_path)
 
-        if not os.path.exists(revese_fn):
+        if not os.path.exists(reverse_fn):
             fig.savefig(fig_fn)
 
-        fig.legend([sim_name])
-        #print(f"Figure saved at {fig_fn}")
-        plt.show()
+        plt.close(fig=fig)
+        
+        row = {"sub1" : sub1,
+              "sub2": sub2, 
+              "pericenter": p,
+               "p_info": [z_p, t_p, snap_p],
+               "apocenter": a,
+               "a_info": [z_a, t_a, snap_a]
+              }
+        return row
+
+
+#     if return_list[0] == True:
+#         z_vals = return_list[1]
+#         dist = return_list[2]
+#         flag_x = return_list[3]
+#         flag_y = return_list[4]
+#         y_label = return_list[5]
+#         snap_list = return_list[6]
+        
+#         final_snap = snap_list[-1]
+        
+#         phys_max = argrelextrema(dist, np.greater)
+#         phys_concav = np.diff(dist, n=2)
+
+#         t_p, p = find_pericenter([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y)
+#         z_p, p = find_pericenter([float(df["z"][snap]) for snap in flag_x], flag_y)
+#         snap_p, p = find_pericenter(flag_x, flag_y)
+        
+#         t_a, a = find_apocenter([lookback_time(float(df["z"][snap])) for snap in snap_list], dist)
+#         z_a, a = find_apocenter([float(df["z"][snap]) for snap in snap_list], dist)
+#         snap_a, a = find_apocenter(snap_list, dist)
+        
+
+#         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,5))
+#         ax.plot(lookback_time(z_vals[:]), dist)
+#         ax.set_xlabel("Lookback Time [Gyr]")
+
+#         ax.axvline(x = t_p, color='gray', linestyle="--")
+        
+#         ax.text(t_p - 0.1, max(dist)/2, "Merger?", rotation=90, color='gray', backgroundcolor='white', fontsize=12)
+
+
+#         ax.set_ylabel(y_label)
+        
+
+#         ax.plot([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y, 'o', color='red', markersize=4, label=f"({np.round(t_p,3)} Gyr, {np.round(p, 3)} Mpc)")
+#         #ax.plot([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y, 'o', color='red', markersize=4, label=f"Placeholder Gyr, Placeholder Mpc)")
+
+#         ax.legend()
+
+#         fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+#         # Save figure to a directory called plots
+#         fig_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_start, final_snap)
+
+#         reverse_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_start, final_snap)
+#         plot_path = f"./{dir_name}/plots/mergers"
+#         if not os.path.exists(plot_path):
+#             os.makedirs(plot_path)
+
+#         if not os.path.exists(reverse_fn):
+#             fig.savefig(fig_fn)
+
+#         plt.close(fig=fig)
+        
+#         row = {"sub1" : sub1,
+#               "sub2": sub2, 
+#               "pericenter": p,
+#                "p_info": [z_p, t_p, snap_p],
+#                "apocenter": a,
+#                "a_info": [z_a, t_a, snap_a]
+#               }
+#         return row
+
+def get_merger_snap(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+    # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
+
+    return_list = flag_merger(dir_name, basePath, sub1, sub2, snap_start, logger)
+    if return_list[0] == True:
+
+        z_vals = return_list[1]
+        dist = return_list[2]
+        flag_x = return_list[3]
+        flag_y = return_list[4]
+        y_label = return_list[5]
+
+        snap_p, p = find_pericenter(flag_x, flag_y)
+        return snap_p
+    
+# ALTERNATIVE METHOD
+def pass_through(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+
+    #z_vals = np.flip(np.array(df["z"]))
+    #a_vals = np.flip(np.array(df["a"]))
+    
+#     f1 = lht.loadTree(basePath, snapNum=99, id=sub1, fields=['SubhaloPos', 'SubhaloHalfmassRad', 'SnapNum'], onlyMPB=True)
+#     f2 = lht.loadTree(basePath, snapNum=99, id=sub2, fields=['SubhaloPos', 'SubhaloHalfmassRad', 'SnapNum'], onlyMPB=True)
+    
+    f1 = sl.loadTree(basePath, snapNum=snap_start, id=sub1, fields=['SubhaloPos', 'SubhaloMass', 'SubhaloHalfmassRad', 'SnapNum'], onlyMDB=True, treeName="SubLink", cache=True)
+    f2 = sl.loadTree(basePath, snapNum=snap_start, id=sub2, fields=['SubhaloPos', 'SubhaloMass', 'SubhaloHalfmassRad', 'SnapNum'], onlyMDB=True, treeName="SubLink", cache=True)
+ 
+    try:
+        if len(f1['SubhaloPos']) > 101 - snap_start or len(f2['SubhaloPos']) > 101 - snap_start:
+            return [False]
+        else:
+            if max(f1['SubhaloMass'][:]*1e10/0.704) > 1e13 and max(f2['SubhaloMass'][:]*1e10/0.704) > 1e13:
+                new_data = align_snapshots(f1, f2)
+
+                snapnum1 = new_data[0][0]
+                pos1 = new_data[0][1] # x,y,z coordinates of subhalo 1 over all snapshots
+
+                snapnum2 = new_data[1][0]
+                pos2 = new_data[1][1] # x,y,z coordinates of subhalo 2 over all snapshots
+
+                snap_list = snapnum1
+                final_snap = snap_list[-1]
+
+
+                new_a_vals = []
+                new_z_vals = []
+                for snap in snapnum1:
+                    new_a_vals.append(df["a"][snap])
+                    new_z_vals.append(df["z"][snap])
+
+                new_a_vals = np.array(new_a_vals)
+                new_z_vals = np.array(new_z_vals)
+
+                look_at = (new_z_vals < 100)
+
+                # Subhalo coordinates are by default in ckpc/h, so this converts to cMpc/h
+                codist = np.array(calc_dist(pos1, pos2, convert=[]))/1000
+                co_y_label = "Distance [cMpc/h]"
+
+                # Factor to convert each comoving coordinate to the physical coordinate
+                convert = (1/0.6774)*0.001*new_a_vals[look_at]
+                dist = np.array(calc_dist(pos1, pos2, convert=convert))
+                y_label = "Distance [Mpc]"
+
+                rad = align_snap_info(f1, f2, f1['SubhaloHalfmassRad'][:], f2['SubhaloHalfmassRad'][:])
+                r1 = (rad[0][1])*convert
+                r2 = (rad[1][1])*convert
+
+                #snap = get_merger_snap("TNG-Cluster", basePath, sub1=sub1, sub2=sub2, snap_start=snap_start)
+
+                #plt.plot(lookback_time(new_z_vals[look_at]), r1)
+                #plt.plot(lookback_time(new_z_vals[look_at]), r2)
+
+                if abs(max(dist) - min(dist)) < 50:
+                    r = r1 + r2 
+                    has_merged = dist < r
+
+                    if True in has_merged:
+                        if logger:
+                            logger.info(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                        else:
+                            pass
+                            #print(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                        return [True, new_z_vals, dist, r, y_label, snapnum1]
+                    else:
+                        return [False]
+                else:
+                    if logger:
+                        logger.info(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+                    else:
+                        pass
+                        #print(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+
+                    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(11,5))
+
+                    ax[0].plot(lookback_time(new_z_vals[look_at]), codist)
+                    ax[1].plot(lookback_time(new_z_vals[look_at]), dist)
+                    ax[0].set_xlabel("Lookback Time [Gyr]")
+                    ax[1].set_xlabel("Lookback Time [Gyr]")
+
+
+                    fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+                    # Save figure to a directory called plots
+                    fig_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snapnum1[0], snapnum1[-1])
+
+                    reverse_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snapnum1[0], snapnum1[-1])
+                    plot_path = f"./{dir_name}/plots/unphysical"
+                    if not os.path.exists(plot_path):
+                        os.makedirs(plot_path)
+
+                    if not os.path.exists(reverse_fn):
+                        fig.savefig(fig_fn)
+
+                    plt.close(fig=fig)
+
+                    return [False]
+            else:
+                return [False]
+    except TypeError:
+        print(f"Error: {sub1} & {sub2}")
+        return [False]
+        
+    # Add in criteria later that requires True to hold for multiple snapshots 
+    #print(list(has_merged).count(True))
+    
+def min_mass(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+
+    #z_vals = np.flip(np.array(df["z"]))
+    #a_vals = np.flip(np.array(df["a"]))
+    
+    f1 = sl.loadTree(basePath, snapNum=99, id=sub1, fields=['SubhaloPos', 'SubhaloMass', 'SubhaloHalfmassRad', 'SnapNum'], onlyMPB=True)
+    f2 = sl.loadTree(basePath, snapNum=99, id=sub2, fields=['SubhaloPos', 'SubhaloMass', 'SubhaloHalfmassRad', 'SnapNum'], onlyMPB=True)
+
+    try:
+        new_data = align_snapshots(f1, f2)
+
+        snapnum1 = new_data[0][0]
+        pos1 = new_data[0][1] # x,y,z coordinates of subhalo 1 over all snapshots
+
+        snapnum2 = new_data[1][0]
+        pos2 = new_data[1][1] # x,y,z coordinates of subhalo 2 over all snapshots
+
+        snap_list = snapnum1
+        final_snap = snap_list[-1]
+
+        log_m1 = np.log10(max(f1["SubhaloMass"][:])*1e10/0.704)
+        log_m2 = np.log10(max(f2["SubhaloMass"][:])*1e10/0.704)
+
+        if log_m1 > 15 or log_m2 > 15:
+
+            new_a_vals = []
+            new_z_vals = []
+            for snap in snapnum1:
+                new_a_vals.append(df["a"][snap])
+                new_z_vals.append(df["z"][snap])
+
+            new_a_vals = np.array(new_a_vals)
+            new_z_vals = np.array(new_z_vals)
+
+            look_at = (new_z_vals < 100)
+
+            # Subhalo coordinates are by default in ckpc/h, so this converts to cMpc/h
+            codist = np.array(calc_dist(pos1, pos2, convert=[]))/1000
+            co_y_label = "Distance [cMpc/h]"
+
+            # Factor to convert each comoving coordinate to the physical coordinate
+            convert = (1/0.6774)*0.001*new_a_vals[look_at]
+            dist = np.array(calc_dist(pos1, pos2, convert=convert))
+            y_label = "Distance [Mpc]"
+
+            rad = align_snap_info(f1, f2, f1['SubhaloHalfmassRad'][:], f2['SubhaloHalfmassRad'][:])
+            r1 = (rad[0][1])*convert
+            r2 = (rad[1][1])*convert
+
+            #snap = get_merger_snap("TNG-Cluster", basePath, sub1=sub1, sub2=sub2, snap_start=snap_start)
+
+            #plt.plot(lookback_time(new_z_vals[look_at]), r1)
+            #plt.plot(lookback_time(new_z_vals[look_at]), r2)
+
+            if abs(max(dist) - min(dist)) < 50:
+                r = r1 + r2 
+                has_merged = dist < r
+
+                if True in has_merged:
+                    if logger:
+                        logger.info(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                    else:
+                        pass
+                        #print(f"POSSIBLE MERGER BETWEEN: Subhalos {sub1} and {sub2}")
+                    return [True, new_z_vals, dist, r, y_label, snapnum1]
+                else:
+                    return [False]
+            else:
+                if logger:
+                    logger.info(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+                else:
+                    pass
+                    #print(f"Unphysical distance jump between Subhalos {sub1} and {sub2}")
+
+                fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(11,5))
+
+                ax[0].plot(lookback_time(new_z_vals[look_at]), codist)
+                ax[1].plot(lookback_time(new_z_vals[look_at]), dist)
+                ax[0].set_xlabel("Lookback Time [Gyr]")
+                ax[1].set_xlabel("Lookback Time [Gyr]")
+
+
+                fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+                # Save figure to a directory called plots
+                fig_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_start, snapnum1[-1])
+
+                reverse_fn = "./%s/plots/unphysical/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_start, snapnum1[-1])
+                plot_path = f"./{dir_name}/plots/unphysical"
+                if not os.path.exists(plot_path):
+                    os.makedirs(plot_path)
+
+                if not os.path.exists(reverse_fn):
+                    fig.savefig(fig_fn)
+
+                plt.close(fig=fig)
+
+                return [False]
+        else:
+            return [False]
+    except TypeError:
+        print("ERROR")
+        return [False]
+    # Add in criteria later that requires True to hold for multiple snapshots 
+    #print(list(has_merged).count(True))
+    
+    
+def plot_merger_new(dir_name, basePath, sub1, sub2, snap_start, logger=None):
+    # Plot both comoving and physical coordinates over time in across redshifts (nonlinear time) and snapshot number (linear time)
+
+    return_list = pass_through(dir_name, basePath, sub1, sub2, snap_start, logger)
+    if return_list[0] == True:
+
+        z_vals = return_list[1]
+        dist = return_list[2]
+        r = return_list[3]
+        y_label = return_list[4]
+        snap_list = return_list[5]
+        
+        final_snap = snap_list[-1]
+        
+
+        t_p, p = find_pericenter([lookback_time(float(df["z"][snap])) for snap in snap_list], dist)
+        z_p, p = find_pericenter([float(df["z"][snap]) for snap in snap_list], dist)
+        snap_p, p = find_pericenter(snap_list, dist)
+
+        t_a, a = find_apocenter([lookback_time(float(df["z"][snap])) for snap in snap_list], dist)
+        z_a, a = find_apocenter([float(df["z"][snap]) for snap in snap_list], dist)
+        snap_a, a = find_apocenter(snap_list, dist)
+
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,5))
+        ax.plot(lookback_time(z_vals), dist, label='Distance')
+        ax.plot(lookback_time(z_vals), r, label='Combined HMR')
+        ax.set_xlabel("Lookback Time [Gyr]")
+
+        ax.axvline(x = t_p, color='gray', linestyle="--")
+
+        ax.text(t_p - 0.1, max(dist)/2, "Merger?", rotation=90, color='gray', backgroundcolor='white', fontsize=12)
+
+
+        ax.set_ylabel(y_label)
+
+
+        ax.plot(lookback_time(float(df["z"][snap_p])), p, 'o', color='red', markersize=4, label=f"({np.round(t_p,3)} Gyr, {np.round(p, 3)} Mpc)")
+        #ax.plot([lookback_time(float(df["z"][snap])) for snap in flag_x], flag_y, 'o', color='red', markersize=4, label=f"Placeholder Gyr, Placeholder Mpc)")
+
+        ax.legend(loc='upper right')
+
+        fig.suptitle("Distance between subhalos " + str(sub1) + " & " + str(sub2))
+
+        # Save figure to a directory called plots
+        fig_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub1, sub2, snap_list[0], snap_list[-1])
+
+        reverse_fn = "./%s/plots/mergers/dist_%s&%s_snap=%s-%s.png"%(dir_name, sub2, sub1, snap_list[0], snap_list[-1])
+        plot_path = f"./{dir_name}/plots/mergers"
+        if not os.path.exists(plot_path):
+            os.makedirs(plot_path)
+
+        if not os.path.exists(reverse_fn):
+            fig.savefig(fig_fn)
+
+        plt.close(fig=fig)
+
+        row = {"sub1" : sub1,
+              "sub2": sub2, 
+              "pericenter": p,
+               "p_info": [z_p, t_p, snap_p],
+               "apocenter": a,
+               "a_info": [z_a, t_a, snap_a]
+              }
+        return row
+    
+# def ax_plot_merger(sim_name, sub1, sub2, snap_start, snap_end, return_list, ax):
+#     z_vals = return_list[1]
+#     codist = return_list[2]
+#     dist = return_list[3]
+#     co_x = return_list[4]
+#     co_y = return_list[5]
+#     phys_x = return_list[6]
+#     phys_y = return_list[7]
+
+
+#     t_p, p = find_pericenter([lookback_time(float(df["z"][snap])) for snap in phys_x], phys_y)
+
+
+#     ax.plot(lookback_time(z_vals[:]), dist, label=f"{sub1} & {sub2}")
+
+#     # ax2 = ax.twiny()
+#     # ax2.plot(z_vals[:], dist)
+#     # ax2.cla()
+#     #ax.set_xlabel("Lookback Time [Gyr]")
+
+#     #ax.axvline(x = t_p, color='gray', linestyle="--")
+    
+#     #ax.text(t_p - 0.1, max(dist)/2, "Merger?", rotation=90, color='gray', backgroundcolor='white', fontsize=12)
+
+#     # ax[1,0].plot(snapnum1[:i], codist)
+#     # ax[1,1].plot(snapnum1[:i], dist)
+
+#     co_y_label = "Comoving Distance [cMpc/h]"
+#     y_label = "Distance [Mpc]"
+
+
+#     #ax.set_ylabel(y_label)
+    
+
+#     ax.plot([lookback_time(float(df["z"][snap])) for snap in phys_x], phys_y, 'o', color='red', markersize=4)
+
+
+#     ax.legend()
+
+#     #ax.set_title(f"{sub1} & {sub2}")

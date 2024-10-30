@@ -9,9 +9,18 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 import os
 import argparse
+import sys
+
+sys.path.append("../")
+
+
+import illustris_python.sublink as sl 
+import illustris_python.groupcat as gc
+import illustris_python.lhalotree as lht
+import illustris_python.snapshot as sn 
 
 font = {'family' : 'serif',
-        'size'   : 14}
+        'size'   : 10}
 
 plt.rc('font', **font)
 
@@ -22,11 +31,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-s", "--sim", required=True, type=str, help="Select simulation from IllustrisTNG")
 
 
-def animation(sim_name, sub1, sub2, snap_start):
-    f1, f2 = download_hdf5(sim_name, snap_start, subhalo_list=[sub1, sub2])
+def animation(sim_name, basePath, sub1, sub2, snap_start):
+    f1 = sl.loadTree(basePath, snapNum=snap_start, id=sub1, fields=['SnapNum', 'SubhaloHalfmassRad', 'SubhaloPos'], onlyMDB=True, treeName="SubLink", cache=True)
+    f2 = sl.loadTree(basePath, snapNum=snap_start, id=sub2, fields=['SnapNum', 'SubhaloHalfmassRad', 'SubhaloPos'], onlyMDB=True, treeName="SubLink", cache=True)
 
-    r1 = f1['SubhaloHalfmassRad'][:]
-    r2 = f2['SubhaloHalfmassRad'][:]
+    r1 = f1['SubhaloHalfmassRad'][:]*10
+    r2 = f2['SubhaloHalfmassRad'][:]*10
 
     position1 = f1['SubhaloPos'][:]
     x1 = []
@@ -106,10 +116,14 @@ def animation(sim_name, sub1, sub2, snap_start):
     ax.set_zlim(min_z, max_z)
 
     # Add legend
-    ax.legend()
-    ax.set_xlabel('x (cMpc/h)')
-    ax.set_ylabel('y (cMpc/h)')
-    ax.set_zlabel('z (cMpc/h)')
+#     ax.legend()
+#     ax.set_xlabel('x')
+#     ax.set_ylabel('y')
+#     ax.set_zlabel('z')
+       
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.set_zticklabels([])
 
     def update(frame):
         # Update the scatter plots with the current points from the lists
@@ -125,7 +139,7 @@ def animation(sim_name, sub1, sub2, snap_start):
 
     gif_fn = f"3d_anim_{sub1}&{sub2}.gif"
 
-    anim_dir = f"../{sim_name}/animations/"
+    anim_dir = f"./{sim_name}/animations/"
     if not os.path.exists(anim_dir):
         os.makedirs(anim_dir)
     fn = anim_dir + gif_fn
