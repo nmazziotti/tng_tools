@@ -89,6 +89,11 @@ def redshifts(basePath):
     df.to_csv('./redshifts+scale_factors.csv', index=False)
     return df
 
+try:
+    df = pd.read_csv('./redshifts+scale_factors.csv')
+except FileNotFoundError:
+    df = redshifts(basePathC)
+
 def integrand(zz):
     om = 0.3089
     ol = 0.6911

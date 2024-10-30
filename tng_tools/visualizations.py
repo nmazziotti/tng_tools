@@ -7,6 +7,7 @@ from matplotlib import ticker, rc
 from astropy import units as u
 from astropy import wcs                                                          
 from astropy.io import fits 
+from astropy import constants as const
 
 sys.path.append("../")
 
